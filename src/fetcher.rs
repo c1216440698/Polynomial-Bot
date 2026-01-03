@@ -57,34 +57,39 @@ impl TokenApi for ClobClient {
         filtered_list: Option<HashSet<String>>
     ) -> Result<Vec<String>> {
         let mut tags_set: HashSet<String> = HashSet::new();
-        let tags_set_ref = &mut tags_set;
-        let filtered_list_ref = filtered_list.as_ref();
         let mut ret: Vec<String> = Vec::new();
-        self.http_client
+
+        // 获取引用
+        let filtered_list_ref = filtered_list.as_ref();
+
+        let sports_json: Value = self.http_client
             .get(SPORT_URL)
             .send().await
             .map_err(|e| PolyfillError::network(format!("Request failed: {}", e), e))?
-            .json::<Value>().await?
+            .json().await?;
+
+        sports_json
             .as_array()
             .into_iter()
             .flatten()
             .filter(|entry| {
-                let sport_tag = entry.get("sport");
-                sport_tag.map_or(false, |tag| {
-                    let tag_str = tag.as_str();
-                    tag_str.map_or(false, |s| filtered_list_ref.map_or(true, |set| set.contains(s)))
-                })
+                entry
+                    .get("sport")
+                    .and_then(|v| v.as_str())
+                    .map_or(false, |s| filtered_list_ref.map_or(true, |set| set.contains(s)))
             })
             .filter_map(|entry| entry.get("tags")?.as_str())
             .flat_map(|s| s.split(','))
             .map(|s| s.trim())
-            .filter(|s| { !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) })
+            .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
             .for_each(|s| {
-                if tags_set_ref.insert(s.to_string()) {
-                    ret.push(s.to_string());
+                let tag = s.to_string();
+                if tags_set.insert(tag.clone()) {
+                    ret.push(tag);
                 }
             });
-        return Ok(ret);
+
+        Ok(ret)
     }
 }
 
