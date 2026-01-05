@@ -1,4 +1,4 @@
-use crate::common::{ Outcome, SLUG_URL, SPORT_URL };
+use crate::common::{ MARKET_URL, Outcome, SLUG_URL, SPORT_URL };
 use crate::bot_error::TokenError;
 use chrono::Datelike;
 use polyfill_rs::math::spread_pct;
@@ -10,7 +10,8 @@ use crate::common::{ EVENT_URL, Result };
 use crate::common::CRYPTO_PATTERNS;
 use polyfill_rs::PolyfillError;
 use crate::context::BotContext;
-use anyhow::{ self, Error, Ok, anyhow };
+use anyhow::{ Error, Ok, anyhow };
+use futures::future;
 
 #[derive(Debug, Clone, Hash)]
 pub struct Token {
@@ -41,7 +42,9 @@ trait TokenApi {
         filtered_list: Option<HashSet<String>>
     ) -> Result<Vec<String>>;
 
-    async fn get_market_by_slug(&self, event_slug: String) -> Result<Vec<String>>;
+    async fn get_market_id_by_slug(&self, event_slug: String) -> Result<Vec<String>>;
+
+    async fn get_market_data_by_id(&self, id: String) -> Result<MarketMetaData>;
 }
 
 impl TokenApi for ClobClient {
@@ -96,7 +99,7 @@ impl TokenApi for ClobClient {
         Ok(ret)
     }
 
-    async fn get_market_by_slug(&self, event_slug: String) -> Result<Vec<String>> {
+    async fn get_market_id_by_slug(&self, event_slug: String) -> Result<Vec<String>> {
         let slug_url = format!("{}/{}", SLUG_URL, event_slug);
         let resp_json: Value = self.http_client
             .get(slug_url)
@@ -106,7 +109,7 @@ impl TokenApi for ClobClient {
 
         let markets = resp_json
             .as_object()
-            .ok_or_else(|| anyhow!("expect markets meta data but got nothing"))?;
+            .ok_or_else(|| anyhow!("expect markets data but got nothing"))?;
         let market_ids: Vec<String> = markets
             .get("markets")
             .and_then(|m: &Value| m.as_array())
@@ -117,9 +120,43 @@ impl TokenApi for ClobClient {
                     .get("id")
                     .and_then(|id| id.as_str())
                     .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
             )
             .collect();
         Ok(market_ids)
+    }
+
+    async fn get_market_data_by_id(&self, id: String) -> Result<MarketMetaData> {
+        let market_url = format!("{}/{}", MARKET_URL, id);
+        let resp_json: Value = self.http_client
+            .get(slug_url)
+            .send().await
+            .map_err(|e| PolyfillError::network(format!("Request failed: {}", e), e))?
+            .json().await?;
+        let market_data = resp_json
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("expect market data but got nothing"))?;
+    }
+}
+
+#[derive(Debug, Clone)]
+enum MarketType {
+    SPORTS,
+    CRYPTO,
+}
+
+#[derive(Debug, Clone)]
+struct MarketMetaData {
+    question: String,
+    start_time: String,
+    yes_token: String,
+    no_token: String,
+    market_type: MarketType,
+}
+
+impl MarketMetaData {
+    fn new(q: String, s: String, y: String, n: String, t: MarketType) -> Self {
+        Self { question: q, start_time: s, yes_token: y, no_token: n, market_type: t }
     }
 }
 
@@ -131,24 +168,33 @@ impl TokenFetcher {
         }
     }
 
-    async fn get_crypto_markets(&self, slugs: Vec<String>) -> Result<Vec<String>> {
-        let slugs = TokenFetcher::generate_crypto_slugs()?;
+    async fn get_market_data_by_id(&self, id: String) -> Result<MarketMetaData> {}
 
-        for slug in slugs {
-            tokio::spawn()
-        }
-
+    async fn get_crypto_markets_id(&self) -> Result<Vec<String>> {
+        let slugs = TokenFetcher::generate_crypto_slugs();
+        return self.get_crypto_markets_by_slugs(slugs).await;
     }
 
-    async fn get_market_by_slug(&self, event_slug: String) -> Result<Vec<String>> {
-        self.context.inner.client.get_market_by_slug(event_slug).await
+    async fn get_crypto_markets_by_slugs(&self, slugs: Vec<String>) -> Result<Vec<String>> {
+        let futures = slugs.iter().map(|slug| self.get_market_id_by_slug(slug.clone()));
+        let results = future::join_all(futures).await;
+        let market_ids: Vec<String> = results
+            .into_iter()
+            .flat_map(|res| res.ok())
+            .flatten()
+            .collect();
+        Ok(market_ids)
     }
 
-    fn generate_crypto_slugs() -> Result<Vec<String>> {
+    async fn get_market_id_by_slug(&self, event_slug: String) -> Result<Vec<String>> {
+        self.context.inner.client.get_market_id_by_slug(event_slug).await
+    }
+
+    fn generate_crypto_slugs() -> Vec<String> {
         let mut slugs: Vec<String> = Vec::new();
         let base_now = chrono::Local::now();
 
-        for i in 0..1 {
+        for i in 0..3 {
             let future_date = base_now + chrono::Duration::days(i);
             let f_month = future_date.format("%B").to_string().to_lowercase();
             let f_day = future_date.day();
@@ -157,8 +203,7 @@ impl TokenFetcher {
                 slugs.push(format!("{}{}", p, f_suffix));
             }
         }
-        println!("{:?}", slugs);
-        Ok(slugs)
+        return slugs;
     }
 
     async fn get_specified_tag_ids(

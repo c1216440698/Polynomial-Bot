@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+futures = { version = "0.3.31", features = ["std"] }
 anyhow = "1.0.100"
 dashmap = "6.1.0"
 polyfill-rs = "0.2.3"
