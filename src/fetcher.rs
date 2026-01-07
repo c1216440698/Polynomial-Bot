@@ -1,4 +1,4 @@
-use crate::common::{ MARKET_URL, Outcome, SLUG_URL, SPORT_URL };
+use crate::common::{ MARKET_URL, Outcome, SLUG_URL, SPORT_URL, Market };
 use crate::bot_error::TokenError;
 use chrono::Datelike;
 use polyfill_rs::decode::deserializers;
@@ -15,7 +15,7 @@ use crate::context::BotContext;
 use std::result::Result::Ok;
 use anyhow::{ anyhow };
 use futures::future;
-use polyfill_rs::types::{ Token, Market };
+use polyfill_rs::types::{ Token };
 
 trait TokenApi {
     async fn get_events_by_params(&self, params: HashMap<String, String>) -> Result<Value>;
@@ -25,6 +25,8 @@ trait TokenApi {
     ) -> Result<Vec<String>>;
 
     async fn get_market_id_by_slug(&self, event_slug: String) -> Result<Vec<String>>;
+
+    async fn get_market_by_id(&self, condition_id: &str) -> Result<Market>;
 }
 
 impl TokenApi for ClobClient {
@@ -104,6 +106,21 @@ impl TokenApi for ClobClient {
             .collect();
         Ok(market_ids)
     }
+
+    async fn get_market_by_id(&self, condition_id: &str) -> Result<Market> {
+        let response = self.http_client
+            .get(format!("{}/{}", MARKET_URL, condition_id))
+            .send().await
+            .map_err(|e| PolyfillError::network(format!("Request failed: {}", e), e))?;
+
+        response
+            .json::<Market>().await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    PolyfillError::parse(format!("Failed to parse response: {}", e), None)
+                )
+            })
+    }
 }
 
 pub struct TokenFetcher {
@@ -122,9 +139,10 @@ impl TokenFetcher {
     pub async fn run_crypto(&mut self) -> Result<Vec<Market>> {
         let market_ids = self.get_crypto_markets_id().await?;
         let mut set = JoinSet::new();
+        println!("{:?}", market_ids);
         for id in market_ids {
             let client = self.client.clone();
-            set.spawn(async move { client.get_market(&id).await });
+            set.spawn(async move { client.get_market_by_id(&id).await });
         }
         let mut markets: Vec<Market> = Vec::with_capacity(512);
         while let Some(res) = set.join_next().await {

@@ -1,4 +1,8 @@
 use polyfill_rs::errors::PolyfillError;
+use serde::{ Deserialize, Serialize };
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
+use serde_with::{ serde_as, json::JsonString };
 
 pub const EVENT_URL: &str = "https://gamma-api.polymarket.com/events";
 pub const SLUG_URL: &str = "https://gamma-api.polymarket.com/events/slug";
@@ -29,4 +33,64 @@ pub enum MarketType {
 pub enum Outcome {
     YES,
     NO,
+}
+// Market information
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Market {
+    pub id: String,
+    pub question: String,
+    pub condition_id: String,
+    #[serde(rename = "clobTokenIds")]
+    #[serde_as(as = "JsonString")]
+    pub tokens: Vec<String>,
+    pub slug: String,
+    pub liquidity: Decimal,
+    pub start_date: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde_as(as = "JsonString")]
+    pub outcomes: Vec<String>,
+    #[serde_as(as = "JsonString")]
+    pub outcome_prices: Vec<Decimal>,
+    pub volume: Decimal,
+    pub active: bool,
+    pub closed: bool,
+    #[serde(default)]
+    pub spread: Decimal,
+    #[serde(default)]
+    pub last_trade_price: Decimal,
+    #[serde(default)]
+    pub best_bid: Decimal,
+    pub best_ask: Decimal,
+    #[serde(default)]
+    #[serde(rename = "questionID")]
+    pub question_id: String,
+    #[serde(default)]
+    pub new: bool,
+    #[serde(default)]
+    pub featured: bool,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default)]
+    pub enable_order_book: bool,
+    #[serde(default)]
+    pub order_price_min_tick_size: Decimal,
+    #[serde(default)]
+    pub order_min_size: Decimal,
+    #[serde(default)]
+    pub volume_num: Decimal,
+    #[serde(default)]
+    pub liquidity_num: Decimal,
+    #[serde(default)]
+    pub end_date_iso: String,
+    #[serde(default)]
+    pub start_date_iso: String,
+    #[serde(default)]
+    pub neg_risk: bool,
 }

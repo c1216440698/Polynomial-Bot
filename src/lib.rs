@@ -8,6 +8,7 @@ pub mod prelude {
     pub use crate::common::EVENT_URL;
     pub use crate::common::MARKET_URL;
     pub use crate::common::CRYPTO_PATTERNS;
+    pub use crate::common::Market;
     pub use crate::common::Result;
     pub use crate::context::BotContext;
 }
