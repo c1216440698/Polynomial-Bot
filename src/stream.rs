@@ -12,6 +12,7 @@ use std::pin::Pin;
 use std::task::{ Context, Poll };
 use tokio::sync::mpsc;
 use tracing::{ debug, error, info, warn };
+use rust_decimal_macros::dec;
 
 /// Trait for market data streams
 pub trait MarketStream: Stream<Item = Result<StreamMessage>> + Send + Sync {
@@ -206,7 +207,6 @@ impl WebSocketStream {
             custom_feature_enabled: None,
             auth: None,
         };
-
         self.subscribe_async(subscription).await
     }
 
@@ -428,51 +428,50 @@ impl WebSocketStream {
             }
         }
     }
+    // #[allow(dead_code)]
+    // async fn reconnect(&mut self) -> Result<()> {
+    //     let mut delay = self.reconnect_config.base_delay;
+    //     let mut retries = 0;
 
-    /// Reconnect with exponential backoff
-    #[allow(dead_code)]
-    async fn reconnect(&mut self) -> Result<()> {
-        let mut delay = self.reconnect_config.base_delay;
-        let mut retries = 0;
+    //     while retries < self.reconnect_config.max_retries {
+    //         warn!("Attempting to reconnect (attempt {})", retries + 1);
 
-        while retries < self.reconnect_config.max_retries {
-            warn!("Attempting to reconnect (attempt {})", retries + 1);
+    //         match self.connect().await {
+    //             Ok(()) => {
+    //                 info!("Successfully reconnected");
+    //                 self.stats.reconnect_count += 1;
 
-            match self.connect().await {
-                Ok(()) => {
-                    info!("Successfully reconnected");
-                    self.stats.reconnect_count += 1;
+    //                 // Resubscribe to all previous subscriptions
+    //                 let subscriptions = self.subscriptions.clone();
+    //                 for subscription in subscriptions {
+    //                     self.send_message(serde_json::to_value(subscription)?).await?;
+    //                 }
 
-                    // Resubscribe to all previous subscriptions
-                    let subscriptions = self.subscriptions.clone();
-                    for subscription in subscriptions {
-                        self.send_message(serde_json::to_value(subscription)?).await?;
-                    }
+    //                 return Ok(());
+    //             }
+    //             Err(e) => {
+    //                 error!("Reconnection attempt {} failed: {}", retries + 1, e);
+    //                 retries += 1;
 
-                    return Ok(());
-                }
-                Err(e) => {
-                    error!("Reconnection attempt {} failed: {}", retries + 1, e);
-                    retries += 1;
+    //                 if retries < self.reconnect_config.max_retries {
+    //                     tokio::time::sleep(delay).await;
+    //                     delay = std::cmp::min(
+    //                         delay.mul_f64(self.reconnect_config.backoff_multiplier),
+    //                         self.reconnect_config.max_delay
+    //                     );
+    //                 }
+    //             }
+    //         }
+    //     }
 
-                    if retries < self.reconnect_config.max_retries {
-                        tokio::time::sleep(delay).await;
-                        delay = std::cmp::min(
-                            delay.mul_f64(self.reconnect_config.backoff_multiplier),
-                            self.reconnect_config.max_delay
-                        );
-                    }
-                }
-            }
-        }
-
-        Err(
-            PolyfillError::stream(
-                format!("Failed to reconnect after {} attempts", self.reconnect_config.max_retries),
-                crate::errors::StreamErrorKind::ConnectionFailed
-            )
-        )
-    }
+    //     Err(
+    //         PolyfillError::stream(
+    //             format!("Failed to reconnect after {} attempts", self.reconnect_config.max_retries),
+    //             crate::errors::StreamErrorKind::ConnectionFailed
+    //         )
+    //     )
+    // }
+    // / Reconnect with exponential backoff
 }
 
 impl Stream for WebSocketStream {

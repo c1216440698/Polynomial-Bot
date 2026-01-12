@@ -1,8 +1,11 @@
-use polyfill_rs::ClobClient;
+use std::{ sync::Arc };
+use polynomial::{ fetcher::{ DataEngine } };
 mod common;
 use common::Result;
 #[tokio::main]
 async fn main() -> Result<()> {
-    let client = ClobClient::new("https://clob.polymarket.com");
+    let data_engine = Arc::new(DataEngine::new());
+    data_engine.start();
+    tokio::signal::ctrl_c().await.expect("fail to listen to event");
     Ok(())
 }

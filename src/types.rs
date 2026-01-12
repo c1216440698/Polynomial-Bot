@@ -749,15 +749,18 @@ pub struct Subscription {
 pub enum WssChannelType {
     #[serde(rename = "USER")]
     User,
-    #[serde(rename = "MARKET")]
-    Market,
+    #[serde(rename = "CRYPTO")]
+    Crypto,
+    #[serde(rename = "SPORTS")]
+    Sports,
 }
 
 impl WssChannelType {
     pub fn as_str(&self) -> &'static str {
         match self {
             WssChannelType::User => "USER",
-            WssChannelType::Market => "MARKET",
+            WssChannelType::Crypto => "CRYPTO",
+            WssChannelType::Sports => "SPORTS",
         }
     }
 }
@@ -1039,7 +1042,7 @@ pub struct OrderBookSummary {
     pub market: String,
     pub asset_id: String,
     pub hash: String,
-    #[serde(deserialize_with = "crate::decode::deserializers::number_from_string")]
+    #[serde(deserialize_with = "polyfill_rs::decode::deserializers::number_from_string")]
     pub timestamp: u64,
     pub bids: Vec<OrderSummary>,
     pub asks: Vec<OrderSummary>,

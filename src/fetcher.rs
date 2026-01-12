@@ -6,16 +6,19 @@ use crate::common::{
     Result,
     SLUG_URL,
     SPORT_URL,
-    Token,
+    WEBSOCKET_MARKET_URL,
     TokenType,
+    Token,
 };
+use crate::stream::WebSocketStream;
+use crate::types::{ WssChannelType, WssAuth };
+
 use chrono::Datelike;
-use polyfill_rs::{ ClobClient };
+use polyfill_rs::{ PolyfillError, ClobClient, OrderBookImpl };
 use tokio::task::JoinSet;
 use std::{ collections::HashSet, sync::Arc };
 use std::collections::HashMap;
 use serde_json::Value;
-use polyfill_rs::PolyfillError;
 use std::result::Result::Ok;
 use anyhow::{ anyhow };
 use futures::future;
@@ -130,55 +133,63 @@ impl TokenApi for ClobClient {
 pub struct DataEngine {
     client: Arc<ClobClient>,
     subscribe_tokens: Arc<Mutex<HashSet<String>>>,
-    subscribe_tx: mpsc::UnboundedSender<Token>,
-    subscribe_rx: mpsc::UnboundedReceiver<Token>,
+    subscribe_tx: Arc<Mutex<mpsc::UnboundedSender<Token>>>,
+    subscribe_rx: Arc<Mutex<mpsc::UnboundedReceiver<Token>>>,
+    subscribe_stream: Arc<Mutex<HashMap<WssChannelType, WebSocketStream>>>,
+    subscribe_orderbook: Arc<Mutex<HashMap<String, OrderBookImpl>>>,
 }
 
 impl DataEngine {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
+        let auth = WssAuth {
+            address: "your_eth_address".to_string(),
+            signature: "your_signature".to_string(),
+            timestamp: chrono::Utc::now().timestamp() as u64,
+            nonce: "random_nonce".to_string(),
+        };
+
+        let mut subsribe_stream = HashMap::new();
+        let crypto_stream = WebSocketStream::new(WEBSOCKET_MARKET_URL);
+        let sports_stream = WebSocketStream::new(WEBSOCKET_MARKET_URL);
+        let user_stream = WebSocketStream::new(WEBSOCKET_MARKET_URL);
+        let crypto_stream = crypto_stream.with_auth(auth.clone());
+        let sports_stream = sports_stream.with_auth(auth.clone());
+        let user_stream = user_stream.with_auth(auth);
+        subsribe_stream.insert(WssChannelType::Crypto, crypto_stream);
+        subsribe_stream.insert(WssChannelType::Sports, sports_stream);
+        subsribe_stream.insert(WssChannelType::User, user_stream);
+
         Self {
             client: Arc::new(ClobClient::new_internet("https://clob.polymarket.com")),
             subscribe_tokens: Arc::new(Mutex::new(HashSet::new())),
-            subscribe_rx: rx,
-            subscribe_tx: tx,
+            subscribe_rx: Arc::new(Mutex::new(rx)),
+            subscribe_tx: Arc::new(Mutex::new(tx)),
+            subscribe_stream: Arc::new(Mutex::new(subsribe_stream)),
+            subscribe_orderbook: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     fn parse_market(market: Market) -> Vec<Token> {
-        let mut tokens = Vec::with_capacity(2);
-        let mut yes_token = Token::default();
-        let mut no_token = Token::default();
-        if let Some(yes_id) = market.tokens.get(0) {
-            yes_token.token_id = Some(yes_id.clone());
-        } else {
-            yes_token.is_valid = false;
-        }
-        if let Some(yes_outcome) = market.outcomes.get(0) {
-            yes_token.outcome = Some(yes_outcome.clone());
-        } else {
-            yes_token.is_valid = false;
-        }
-        yes_token.winner = true;
-
-        if let Some(no_id) = market.tokens.get(1) {
-            no_token.token_id = Some(no_id.clone());
-        } else {
-            no_token.is_valid = false;
-        }
-        if let Some(no_outcome) = market.outcomes.get(1) {
-            no_token.outcome = Some(no_outcome.clone());
-        } else {
-            no_token.is_valid = false;
-        }
-        no_token.winner = true;
-
-        tokens.push(yes_token);
-        tokens.push(no_token);
-        return tokens;
+        market.tokens
+            .iter()
+            .enumerate()
+            .zip(market.outcomes.iter())
+            .map(|((i, id), outcome)| {
+                Token {
+                    token_id: id.clone(),
+                    outcome: outcome.clone(),
+                    winner: {
+                        if i == 0 { true } else { false }
+                    },
+                    is_valid: true,
+                    token_type: TokenType::default(),
+                }
+            })
+            .collect()
     }
 
-    pub async fn stream_crypto_tokens(&mut self) {
+    async fn stream_crypto_tokens(&self) {
         let internal = std::time::Duration::from_mins(10);
         loop {
             let market_ids: Vec<String>;
@@ -205,7 +216,7 @@ impl DataEngine {
                         let tokens = DataEngine::parse_market(market);
                         for mut token in tokens {
                             token.token_type = TokenType::CRYPTO;
-                            match self.subscribe_tx.send(token) {
+                            match self.subscribe_tx.lock().await.send(token) {
                                 Ok(_) => (),
                                 Err(e) => eprint!("transfer token meets err: {}", e),
                             }
@@ -219,32 +230,61 @@ impl DataEngine {
         }
     }
 
-    pub async fn receive_crypto_tokens(&mut self) {
+    async fn receive_crypto_tokens(&self) {
         loop {
-            if let Some(token) = self.subscribe_rx.recv().await {
-                let mut lock = self.subscribe_tokens.lock().await;
-                match token.token_id {
-                    Some(id) => {
-                        if !lock.contains(&id) {
-                            lock.insert(id.clone());
-                            println!("recv tok: {}", id);
-                        }
-                    }
-                    None => {
-                        continue;
+            if let Some(token) = self.subscribe_rx.lock().await.recv().await {
+                let lock = self.subscribe_tokens.lock().await;
+                if !lock.contains(&token.token_id) {
+                    println!("recv token: {}", token.token_id);
+                    match self.subscribe_token(token).await {
+                        Ok(()) => (),
+                        Err(_) => eprintln!("fail to subscrible"),
                     }
                 }
             }
         }
     }
 
-    pub fn start(self) {
-        let mut engine = self;
-        tokio::spawn(async move {
-            tokio::select! {
-            _ = engine.stream_crypto_tokens() => {},
-            _ = engine.receive_crypto_tokens() => {},
+    async fn subscribe_token(&self, token: Token) -> Result<()> {
+        let token_id = token.token_id.clone();
+
+        let mut orderbooks = self.subscribe_orderbook.lock().await;
+        if orderbooks.contains_key(&token_id) {
+            return Ok(());
         }
+
+        let mut streams = self.subscribe_stream.lock().await;
+        let chan_type = match token.token_type {
+            TokenType::CRYPTO => WssChannelType::Crypto,
+            TokenType::SPORTS => WssChannelType::Sports,
+        };
+
+        if let Some(stream) = streams.get_mut(&chan_type) {
+            stream.subscribe_market_channel(vec![token_id.clone()]).await?;
+            let book = OrderBookImpl::new(token_id.clone(), 100);
+            orderbooks.insert(token_id.clone(), book);
+            self.subscribe_tokens.lock().await.insert(token_id);
+            println!("subscribe_ token successfully");
+            Ok(())
+        } else {
+            Err(
+                (PolyfillError::Stream {
+                    message: format!("No stream found for token type: {:?}", token.token_type),
+                    kind: polyfill_rs::errors::StreamErrorKind::SubscriptionFailed,
+                }).into()
+            )
+        }
+    }
+
+    pub fn start(self: Arc<Self>) {
+        let engine1 = self.clone();
+        tokio::spawn(async move {
+            engine1.receive_crypto_tokens().await;
+        });
+
+        let engine2 = self.clone();
+        tokio::spawn(async move {
+            engine2.stream_crypto_tokens().await;
         });
     }
 

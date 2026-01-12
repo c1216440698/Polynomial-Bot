@@ -320,37 +320,36 @@ impl PolyfillError {
 }
 
 // Implement From for common external error types
-impl From<reqwest::Error> for PolyfillError {
-    fn from(err: reqwest::Error) -> Self {
-        if err.is_timeout() {
-            PolyfillError::Timeout {
-                duration: Duration::from_secs(30), // default timeout
-                operation: "HTTP request".to_string(),
-            }
-        } else if err.is_connect() || err.is_request() {
-            PolyfillError::network("HTTP request failed", err)
-        } else {
-            PolyfillError::internal("Unexpected reqwest error", err)
-        }
-    }
-}
+// impl From<reqwest::Error> for PolyfillError {
+//     fn from(err: reqwest::Error) -> Self {
+//         if err.is_timeout() {
+//             PolyfillError::Timeout {
+//                 duration: Duration::from_secs(30), // default timeout
+//                 operation: "HTTP request".to_string(),
+//             }
+//         } else if err.is_connect() || err.is_request() {
+//             PolyfillError::network("HTTP request failed", err)
+//         } else {
+//             PolyfillError::internal("Unexpected reqwest error", err)
+//         }
+//     }
+// }
 
-impl From<serde_json::Error> for PolyfillError {
-    fn from(err: serde_json::Error) -> Self {
-        PolyfillError::Parse {
-            message: format!("JSON parsing failed: {}", err),
-            source: Some(Box::new(err)),
-        }
-    }
-}
+// impl From<serde_json::Error> for PolyfillError {
+//     fn from(err: serde_json::Error) -> Self {
+//         PolyfillError::Parse {
+//             message: format!("JSON parsing failed: {}", err),
+//             source: Some(Box::new(err)),
+//         }
+//     }
+// }
 
-impl From<url::ParseError> for PolyfillError {
-    fn from(err: url::ParseError) -> Self {
-        PolyfillError::config(format!("Invalid URL: {}", err))
-    }
-}
+// impl From<url::ParseError> for PolyfillError {
+//     fn from(err: url::ParseError) -> Self {
+//         PolyfillError::config(format!("Invalid URL: {}", err))
+//     }
+// }
 
-#[cfg(feature = "stream")]
 impl From<tokio_tungstenite::tungstenite::Error> for PolyfillError {
     fn from(err: tokio_tungstenite::tungstenite::Error) -> Self {
         use tokio_tungstenite::tungstenite::Error as WsError;

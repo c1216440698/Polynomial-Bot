@@ -1,7 +1,5 @@
 use std::sync::Arc;
 use polyfill_rs::{ ClobClient };
-use dashmap::DashMap;
-use crate::common::MarketType;
 
 #[derive(Clone)]
 pub struct BotContext {

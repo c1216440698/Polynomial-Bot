@@ -1,6 +1,4 @@
-use polyfill_rs::errors::PolyfillError;
 use serde::{ Deserialize, Serialize };
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use serde_with::{ serde_as, json::JsonString };
 
@@ -8,6 +6,7 @@ pub const EVENT_URL: &str = "https://gamma-api.polymarket.com/events";
 pub const SLUG_URL: &str = "https://gamma-api.polymarket.com/events/slug";
 pub const MARKET_URL: &str = "https://gamma-api.polymarket.com/markets";
 pub const SPORT_URL: &str = "https://gamma-api.polymarket.com/sports";
+pub const WEBSOCKET_MARKET_URL: &str = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 
 pub static CRYPTO_PATTERNS: &[&str] = &[
     "bitcoin-above",
@@ -32,7 +31,6 @@ pub enum MarketType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum TokenType {
     #[default]
-    Unknown,
     CRYPTO,
     SPORTS,
 }
@@ -106,9 +104,9 @@ pub struct Market {
 impl Default for Token {
     fn default() -> Self {
         Self {
-            token_type: TokenType::Unknown,
-            token_id: None,
-            outcome: None,
+            token_type: TokenType::CRYPTO,
+            token_id: String::new(),
+            outcome: String::new(),
             winner: false,
             is_valid: true,
         }
@@ -118,8 +116,8 @@ impl Default for Token {
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct Token {
     pub token_type: TokenType,
-    pub token_id: Option<String>,
-    pub outcome: Option<String>,
+    pub token_id: String,
+    pub outcome: String,
     #[serde(default)]
     pub winner: bool,
     pub is_valid: bool,
