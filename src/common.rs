@@ -1,12 +1,12 @@
-use serde::{ Deserialize, Serialize };
 use rust_decimal::Decimal;
-use serde_with::{ serde_as, json::JsonString };
+use serde::{Deserialize, Serialize};
+use serde_with::{json::JsonString, serde_as};
 
 pub const EVENT_URL: &str = "https://gamma-api.polymarket.com/events";
 pub const SLUG_URL: &str = "https://gamma-api.polymarket.com/events/slug";
 pub const MARKET_URL: &str = "https://gamma-api.polymarket.com/markets";
 pub const SPORT_URL: &str = "https://gamma-api.polymarket.com/sports";
-pub const WEBSOCKET_MARKET_URL: &str = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
+pub const WEBSOCKET_MARKET_URL: &str = "wss://ws-subscriptions-clob.polymarket.com";
 
 pub static CRYPTO_PATTERNS: &[&str] = &[
     "bitcoin-above",
