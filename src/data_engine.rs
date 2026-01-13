@@ -1,15 +1,16 @@
+use crate::book::OrderBookManager;
 use crate::common::{
     CRYPTO_PATTERNS, EVENT_URL, MARKET_URL, Market, Result, SLUG_URL, SPORT_URL, Token, TokenType,
     WEBSOCKET_MARKET_URL,
 };
 use crate::stream::WebSocketStream;
-use crate::types::{WssAuth, WssChannelType};
+use crate::types::{StreamMessage, WssAuth, WssChannelType};
 
 use anyhow::anyhow;
 use chrono::Datelike;
 use dashmap::{DashMap, DashSet};
-use futures::future;
-use polyfill_rs::{ClobClient, OrderBookImpl, PolyfillError};
+use futures::{StreamExt, future};
+use polyfill_rs::{ClobClient, PolyfillError, book, crypto};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::result::Result::Ok;
@@ -142,7 +143,7 @@ pub struct DataEngine {
     subscribe_tx: Arc<Mutex<mpsc::UnboundedSender<Token>>>,
     subscribe_rx: Arc<Mutex<mpsc::UnboundedReceiver<Token>>>,
     subscribe_stream: DashMap<WssChannelType, Arc<Mutex<WebSocketStream>>>,
-    subscribe_orderbook: DashMap<String, OrderBookImpl>,
+    book_manager: OrderBookManager,
 }
 
 impl DataEngine {
@@ -180,7 +181,7 @@ impl DataEngine {
             subscribe_rx: Arc::new(Mutex::new(rx)),
             subscribe_tx: Arc::new(Mutex::new(tx)),
             subscribe_stream,
-            subscribe_orderbook: DashMap::new(),
+            book_manager: OrderBookManager::new(100),
         }
     }
 
@@ -262,7 +263,7 @@ impl DataEngine {
     async fn subscribe_token(&self, token: Token) -> Result<()> {
         let token_id = token.token_id.clone();
 
-        if self.subscribe_orderbook.contains_key(&token_id) {
+        if let Ok(_) = self.book_manager.get_book(&token.token_id) {
             return Ok(());
         }
 
@@ -283,19 +284,33 @@ impl DataEngine {
                     .subscribe_market_channel(vec![token_id.clone()])
                     .await?;
             }
-
-            self.subscribe_orderbook
-                .entry(token_id.clone())
-                .or_insert_with(|| {
-                    let book = OrderBookImpl::new(token_id.clone(), 100);
-                    self.subscribe_tokens.insert(token_id.clone());
-                    println!("✅ Subscribed via DashMap: {}", token_id);
-                    book
-                });
-
+            let book = self.book_manager.get_or_create_book(&token_id);
+            dbg!(book);
             Ok(())
         } else {
             Err(anyhow::anyhow!("No stream found for {:?}", chan_type).into())
+        }
+    }
+
+    async fn handle_crypto_message(&self) -> Result<()> {
+        if let Some(mut crypto_stream) = self.subscribe_stream.get_mut(&WssChannelType::Crypto) {
+            while let Some(message) = crypto_stream.lock().await.next().await {
+                match message? {
+                    StreamMessage::MarketBookUpdate { data } => {
+                        self.book_manager.apply_delta(data)?;
+                    }
+                    StreamMessage::MarketTrade { data } => {
+                        println!("Trade: {} tokens at ${}", data.size, data.price);
+                    }
+                    StreamMessage::Heartbeat { .. } => {
+                        // Connection is alive
+                    }
+                    _ => {}
+                }
+            }
+            return Ok(());
+        } else {
+            return Err(anyhow!("No stream found for crypto stream").into());
         }
     }
 
