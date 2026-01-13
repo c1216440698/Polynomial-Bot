@@ -3,16 +3,15 @@
 //! This module provides high-performance streaming capabilities for
 //! real-time market data and order updates.
 
-use crate::errors::{ PolyfillError, Result };
+use crate::errors::{PolyfillError, Result};
 use crate::types::*;
 use chrono::Utc;
-use futures::{ SinkExt, Stream, StreamExt };
+use futures::{SinkExt, Stream, StreamExt};
 use serde_json::Value;
 use std::pin::Pin;
-use std::task::{ Context, Poll };
+use std::task::{Context, Poll};
 use tokio::sync::mpsc;
-use tracing::{ debug, error, info, warn };
-use rust_decimal_macros::dec;
+use tracing::{debug, error, info, warn};
 
 /// Trait for market data streams
 pub trait MarketStream: Stream<Item = Result<StreamMessage>> + Send + Sync {
@@ -34,7 +33,11 @@ pub trait MarketStream: Stream<Item = Result<StreamMessage>> + Send + Sync {
 #[allow(dead_code)]
 pub struct WebSocketStream {
     /// WebSocket connection
-    connection: Option<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>,
+    connection: Option<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    >,
     /// URL for the WebSocket connection
     url: String,
     /// Authentication credentials
@@ -114,12 +117,12 @@ impl WebSocketStream {
 
     /// Connect to the WebSocket
     async fn connect(&mut self) -> Result<()> {
-        let (ws_stream, _) = tokio_tungstenite
-            ::connect_async(&self.url).await
+        let (ws_stream, _) = tokio_tungstenite::connect_async(&self.url)
+            .await
             .map_err(|e| {
                 PolyfillError::stream(
                     format!("WebSocket connection failed: {}", e),
-                    crate::errors::StreamErrorKind::ConnectionFailed
+                    crate::errors::StreamErrorKind::ConnectionFailed,
                 )
             })?;
 
@@ -131,21 +134,17 @@ impl WebSocketStream {
     /// Send a message to the WebSocket
     async fn send_message(&mut self, message: Value) -> Result<()> {
         if let Some(connection) = &mut self.connection {
-            let text = serde_json
-                ::to_string(&message)
-                .map_err(|e| {
-                    PolyfillError::parse(format!("Failed to serialize message: {}", e), None)
-                })?;
+            let text = serde_json::to_string(&message).map_err(|e| {
+                PolyfillError::parse(format!("Failed to serialize message: {}", e), None)
+            })?;
 
             let ws_message = tokio_tungstenite::tungstenite::Message::Text(text.into());
-            connection
-                .send(ws_message).await
-                .map_err(|e| {
-                    PolyfillError::stream(
-                        format!("Failed to send message: {}", e),
-                        crate::errors::StreamErrorKind::MessageCorrupted
-                    )
-                })?;
+            connection.send(ws_message).await.map_err(|e| {
+                PolyfillError::stream(
+                    format!("Failed to send message: {}", e),
+                    crate::errors::StreamErrorKind::MessageCorrupted,
+                )
+            })?;
 
             self.stats.messages_sent += 1;
         }
@@ -154,19 +153,17 @@ impl WebSocketStream {
     }
 
     /// Subscribe to market data using official Polymarket WebSocket API
+    // Ensure connection
     pub async fn subscribe_async(&mut self, subscription: WssSubscription) -> Result<()> {
-        // Ensure connection
         if self.connection.is_none() {
             self.connect().await?;
         }
 
         // Send subscription message in the format expected by Polymarket
         // The subscription struct will serialize correctly with proper field names
-        let message = serde_json
-            ::to_value(&subscription)
-            .map_err(|e| {
-                PolyfillError::parse(format!("Failed to serialize subscription: {}", e), None)
-            })?;
+        let message = serde_json::to_value(&subscription).map_err(|e| {
+            PolyfillError::parse(format!("Failed to serialize subscription: {}", e), None)
+        })?;
 
         self.send_message(message).await?;
         self.subscriptions.push(subscription.clone());
@@ -177,7 +174,8 @@ impl WebSocketStream {
 
     /// Subscribe to user channel (orders and trades)
     pub async fn subscribe_user_channel(&mut self, markets: Vec<String>) -> Result<()> {
-        let auth = self.auth
+        let auth = self
+            .auth
             .as_ref()
             .ok_or_else(|| PolyfillError::auth("No authentication provided for WebSocket"))?
             .clone();
@@ -214,7 +212,7 @@ impl WebSocketStream {
     /// Custom features include: best_bid_ask, new_market, market_resolved events
     pub async fn subscribe_market_channel_with_features(
         &mut self,
-        asset_ids: Vec<String>
+        asset_ids: Vec<String>,
     ) -> Result<()> {
         let subscription = WssSubscription {
             channel_type: "market".to_string(),
@@ -246,7 +244,8 @@ impl WebSocketStream {
 
     /// Unsubscribe from user channel
     pub async fn unsubscribe_user_channel(&mut self, markets: Vec<String>) -> Result<()> {
-        let auth = self.auth
+        let auth = self
+            .auth
             .as_ref()
             .ok_or_else(|| PolyfillError::auth("No authentication provided for WebSocket"))?
             .clone();
@@ -268,7 +267,7 @@ impl WebSocketStream {
     #[allow(dead_code)]
     async fn handle_message(
         &mut self,
-        message: tokio_tungstenite::tungstenite::Message
+        message: tokio_tungstenite::tungstenite::Message,
     ) -> Result<()> {
         match message {
             tokio_tungstenite::tungstenite::Message::Text(text) => {
@@ -316,99 +315,94 @@ impl WebSocketStream {
     /// Parse Polymarket WebSocket message format
     #[allow(dead_code)]
     fn parse_polymarket_message(&self, text: &str) -> Result<StreamMessage> {
-        let value: Value = serde_json
-            ::from_str(text)
-            .map_err(|e| {
-                PolyfillError::parse(
-                    format!("Failed to parse WebSocket message: {}", e),
-                    Some(Box::new(e))
-                )
-            })?;
+        let value: Value = serde_json::from_str(text).map_err(|e| {
+            PolyfillError::parse(
+                format!("Failed to parse WebSocket message: {}", e),
+                Some(Box::new(e)),
+            )
+        })?;
 
         // Extract message type
-        let message_type = value
-            .get("type")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                PolyfillError::parse("Missing 'type' field in WebSocket message", None)
-            })?;
+        let message_type = value.get("type").and_then(|v| v.as_str()).ok_or_else(|| {
+            PolyfillError::parse("Missing 'type' field in WebSocket message", None)
+        })?;
 
         match message_type {
             "book_update" => {
-                let data = serde_json
-                    ::from_value(value.get("data").unwrap_or(&Value::Null).clone())
-                    .map_err(|e| {
-                        PolyfillError::parse(
-                            format!("Failed to parse book update: {}", e),
-                            Some(Box::new(e))
-                        )
-                    })?;
+                let data =
+                    serde_json::from_value(value.get("data").unwrap_or(&Value::Null).clone())
+                        .map_err(|e| {
+                            PolyfillError::parse(
+                                format!("Failed to parse book update: {}", e),
+                                Some(Box::new(e)),
+                            )
+                        })?;
                 Ok(StreamMessage::BookUpdate { data })
             }
             "trade" => {
-                let data = serde_json
-                    ::from_value(value.get("data").unwrap_or(&Value::Null).clone())
-                    .map_err(|e| {
-                        PolyfillError::parse(
-                            format!("Failed to parse trade: {}", e),
-                            Some(Box::new(e))
-                        )
-                    })?;
+                let data =
+                    serde_json::from_value(value.get("data").unwrap_or(&Value::Null).clone())
+                        .map_err(|e| {
+                            PolyfillError::parse(
+                                format!("Failed to parse trade: {}", e),
+                                Some(Box::new(e)),
+                            )
+                        })?;
                 Ok(StreamMessage::Trade { data })
             }
             "order_update" => {
-                let data = serde_json
-                    ::from_value(value.get("data").unwrap_or(&Value::Null).clone())
-                    .map_err(|e| {
-                        PolyfillError::parse(
-                            format!("Failed to parse order update: {}", e),
-                            Some(Box::new(e))
-                        )
-                    })?;
+                let data =
+                    serde_json::from_value(value.get("data").unwrap_or(&Value::Null).clone())
+                        .map_err(|e| {
+                            PolyfillError::parse(
+                                format!("Failed to parse order update: {}", e),
+                                Some(Box::new(e)),
+                            )
+                        })?;
                 Ok(StreamMessage::OrderUpdate { data })
             }
             "user_order_update" => {
-                let data = serde_json
-                    ::from_value(value.get("data").unwrap_or(&Value::Null).clone())
-                    .map_err(|e| {
-                        PolyfillError::parse(
-                            format!("Failed to parse user order update: {}", e),
-                            Some(Box::new(e))
-                        )
-                    })?;
+                let data =
+                    serde_json::from_value(value.get("data").unwrap_or(&Value::Null).clone())
+                        .map_err(|e| {
+                            PolyfillError::parse(
+                                format!("Failed to parse user order update: {}", e),
+                                Some(Box::new(e)),
+                            )
+                        })?;
                 Ok(StreamMessage::UserOrderUpdate { data })
             }
             "user_trade" => {
-                let data = serde_json
-                    ::from_value(value.get("data").unwrap_or(&Value::Null).clone())
-                    .map_err(|e| {
-                        PolyfillError::parse(
-                            format!("Failed to parse user trade: {}", e),
-                            Some(Box::new(e))
-                        )
-                    })?;
+                let data =
+                    serde_json::from_value(value.get("data").unwrap_or(&Value::Null).clone())
+                        .map_err(|e| {
+                            PolyfillError::parse(
+                                format!("Failed to parse user trade: {}", e),
+                                Some(Box::new(e)),
+                            )
+                        })?;
                 Ok(StreamMessage::UserTrade { data })
             }
             "market_book_update" => {
-                let data = serde_json
-                    ::from_value(value.get("data").unwrap_or(&Value::Null).clone())
-                    .map_err(|e| {
-                        PolyfillError::parse(
-                            format!("Failed to parse market book update: {}", e),
-                            Some(Box::new(e))
-                        )
-                    })?;
+                let data =
+                    serde_json::from_value(value.get("data").unwrap_or(&Value::Null).clone())
+                        .map_err(|e| {
+                            PolyfillError::parse(
+                                format!("Failed to parse market book update: {}", e),
+                                Some(Box::new(e)),
+                            )
+                        })?;
                 Ok(StreamMessage::MarketBookUpdate { data })
             }
             "market_trade" => {
-                let data = serde_json
-                    ::from_value(value.get("data").unwrap_or(&Value::Null).clone())
-                    .map_err(|e| {
-                        PolyfillError::parse(
-                            format!("Failed to parse market trade: {}", e),
-                            Some(Box::new(e))
-                        )
-                    })?;
+                let data =
+                    serde_json::from_value(value.get("data").unwrap_or(&Value::Null).clone())
+                        .map_err(|e| {
+                            PolyfillError::parse(
+                                format!("Failed to parse market trade: {}", e),
+                                Some(Box::new(e)),
+                            )
+                        })?;
                 Ok(StreamMessage::MarketTrade { data })
             }
             "heartbeat" => {
@@ -428,50 +422,52 @@ impl WebSocketStream {
             }
         }
     }
-    // #[allow(dead_code)]
-    // async fn reconnect(&mut self) -> Result<()> {
-    //     let mut delay = self.reconnect_config.base_delay;
-    //     let mut retries = 0;
 
-    //     while retries < self.reconnect_config.max_retries {
-    //         warn!("Attempting to reconnect (attempt {})", retries + 1);
+    #[allow(dead_code)]
+    async fn reconnect(&mut self) -> Result<()> {
+        let mut delay = self.reconnect_config.base_delay;
+        let mut retries = 0;
 
-    //         match self.connect().await {
-    //             Ok(()) => {
-    //                 info!("Successfully reconnected");
-    //                 self.stats.reconnect_count += 1;
+        while retries < self.reconnect_config.max_retries {
+            warn!("Attempting to reconnect (attempt {})", retries + 1);
 
-    //                 // Resubscribe to all previous subscriptions
-    //                 let subscriptions = self.subscriptions.clone();
-    //                 for subscription in subscriptions {
-    //                     self.send_message(serde_json::to_value(subscription)?).await?;
-    //                 }
+            match self.connect().await {
+                Ok(()) => {
+                    info!("Successfully reconnected");
+                    self.stats.reconnect_count += 1;
 
-    //                 return Ok(());
-    //             }
-    //             Err(e) => {
-    //                 error!("Reconnection attempt {} failed: {}", retries + 1, e);
-    //                 retries += 1;
+                    // Resubscribe to all previous subscriptions
+                    let subscriptions = self.subscriptions.clone();
+                    for subscription in subscriptions {
+                        self.send_message(serde_json::to_value(subscription)?)
+                            .await?;
+                    }
 
-    //                 if retries < self.reconnect_config.max_retries {
-    //                     tokio::time::sleep(delay).await;
-    //                     delay = std::cmp::min(
-    //                         delay.mul_f64(self.reconnect_config.backoff_multiplier),
-    //                         self.reconnect_config.max_delay
-    //                     );
-    //                 }
-    //             }
-    //         }
-    //     }
+                    return Ok(());
+                }
+                Err(e) => {
+                    error!("Reconnection attempt {} failed: {}", retries + 1, e);
+                    retries += 1;
 
-    //     Err(
-    //         PolyfillError::stream(
-    //             format!("Failed to reconnect after {} attempts", self.reconnect_config.max_retries),
-    //             crate::errors::StreamErrorKind::ConnectionFailed
-    //         )
-    //     )
-    // }
-    // / Reconnect with exponential backoff
+                    if retries < self.reconnect_config.max_retries {
+                        tokio::time::sleep(delay).await;
+                        delay = std::cmp::min(
+                            delay.mul_f64(self.reconnect_config.backoff_multiplier),
+                            self.reconnect_config.max_delay,
+                        );
+                    }
+                }
+            }
+        }
+
+        Err(PolyfillError::stream(
+            format!(
+                "Failed to reconnect after {} attempts",
+                self.reconnect_config.max_retries
+            ),
+            crate::errors::StreamErrorKind::ConnectionFailed,
+        ))
+    }
 }
 
 impl Stream for WebSocketStream {
@@ -488,13 +484,9 @@ impl Stream for WebSocketStream {
             match connection.poll_next_unpin(cx) {
                 Poll::Ready(Some(Ok(_message))) => {
                     // Simplified message handling
-                    Poll::Ready(
-                        Some(
-                            Ok(StreamMessage::Heartbeat {
-                                timestamp: Utc::now(),
-                            })
-                        )
-                    )
+                    Poll::Ready(Some(Ok(StreamMessage::Heartbeat {
+                        timestamp: Utc::now(),
+                    })))
                 }
                 Poll::Ready(Some(Err(e))) => {
                     error!("WebSocket error: {}", e);
@@ -600,10 +592,7 @@ impl MarketStream for MockStream {
         StreamStats {
             messages_received: self.messages.len() as u64,
             messages_sent: 0,
-            errors: self.messages
-                .iter()
-                .filter(|m| m.is_err())
-                .count() as u64,
+            errors: self.messages.iter().filter(|m| m.is_err()).count() as u64,
             last_message_time: None,
             connection_uptime: std::time::Duration::ZERO,
             reconnect_count: 0,
