@@ -1,7 +1,7 @@
 // src/lib.rs
 pub mod common;
 pub mod context;
-pub mod fetcher;
+pub mod data_engine;
 pub mod bot_error;
 pub mod stream;
 pub mod types;
