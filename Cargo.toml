@@ -17,6 +17,8 @@ serde = "1.0.228"
 serde_with = { version = "3.0", features = ["json"] }
 rust_decimal = { version = "1.39.0", features = ["macros", "serde-float"] }
 tracing = "0.1.44"
-tokio-tungstenite = "0.28.0"
 alloy-primitives = { version = "1.5.2", features = ["serde"] }
 rust_decimal_macros = "1.39.0"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+tokio-tungstenite = { version = "0.28.0", features = ["native-tls", "handshake"] }
+webpki-roots = "1.0.5"
